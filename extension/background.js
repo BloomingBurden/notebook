@@ -4,6 +4,7 @@ const APP = 'https://bloomingburden.github.io/notebook/notebook_app_rich_improve
 const DEV_PATH = '/notebook_app_rich_improved.html';
 const ALARM = 'notebook-review';
 const RETRY_DELAY = 5 * 60_000;
+const REMINDER_INTERVAL = 30 * 60_000;
 const iconUrl = chrome.runtime.getURL('icon.png');
 let queue = Promise.resolve();
 
@@ -28,6 +29,17 @@ function checkSchedule() {
   });
 }
 
+function lastDelivery(entry) {
+  if (Number.isSafeInteger(entry.lastNotifiedAt) && entry.lastNotifiedAt >= entry.dueAt) return entry.lastNotifiedAt;
+  // Version 1 recorded delivery with a boolean.
+  return entry.delivered === true ? entry.dueAt : null;
+}
+
+function nextReminderAt(entry) {
+  const lastNotifiedAt = lastDelivery(entry);
+  return lastNotifiedAt === null ? entry.dueAt : lastNotifiedAt + REMINDER_INTERVAL;
+}
+
 function syncEntries(config, entries) {
   if (!Array.isArray(entries)) throw new Error('Invalid reminder list');
   const existing = new Map(config.entries.map(entry => [entry.id, entry]));
@@ -36,11 +48,12 @@ function syncEntries(config, entries) {
     if (typeof entry?.id !== 'string' || !entry.id || entry.id.length > 256 ||
         typeof entry.title !== 'string' || !Number.isSafeInteger(entry.dueAt) || entry.dueAt <= 0) continue;
     const previous = existing.get(entry.id);
+    const previousDelivery = previous?.dueAt === entry.dueAt ? lastDelivery(previous) : null;
     next.set(entry.id, {
       id: entry.id,
       title: entry.title.slice(0, 160),
       dueAt: entry.dueAt,
-      delivered: entry.delivered === true || (previous?.dueAt === entry.dueAt && previous.delivered === true)
+      lastNotifiedAt: Math.max(previousDelivery ?? 0, lastDelivery(entry) ?? 0) || null
     });
   }
   config.entries = [...next.values()];
@@ -54,7 +67,7 @@ async function processDue(schedules) {
 
   for (const [app, config] of Object.entries(schedules)) {
     if (!config.enabled) continue;
-    const due = config.entries.filter(entry => !entry.delivered && entry.dueAt <= now);
+    const due = config.entries.filter(entry => nextReminderAt(entry) <= now);
     if (due.length && alertsAllowed) {
       const selected = due.length === 1 ? due[0] : null;
       const id = 'review|' + encodeURIComponent(app) + '|' + encodeURIComponent(selected?.id || '');
@@ -65,14 +78,16 @@ async function processDue(schedules) {
           title: 'Пора повторить',
           message: selected?.title || 'Заметок к повторению: ' + due.length
         });
-        for (const entry of due) entry.delivered = true;
+        const lastNotifiedAt = Date.now();
+        for (const entry of due) entry.lastNotifiedAt = lastNotifiedAt;
         changed = true;
       } catch (error) {
         console.warn('Notification could not be displayed', error);
       }
     }
     for (const entry of config.entries) {
-      if (!entry.delivered) nextAt = Math.min(nextAt, entry.dueAt <= now ? now + RETRY_DELAY : entry.dueAt);
+      const nextReminder = nextReminderAt(entry);
+      nextAt = Math.min(nextAt, nextReminder <= now ? now + RETRY_DELAY : nextReminder);
     }
   }
 
@@ -110,7 +125,11 @@ async function handleRequest(app, message) {
     await chrome.storage.local.set({ schedules });
     await processDue(schedules);
   }
-  return { ok: true, enabled: config.enabled, allowed };
+  const deliveries = config.entries.flatMap(entry => {
+    const lastNotifiedAt = lastDelivery(entry);
+    return lastNotifiedAt === null ? [] : [{ id: entry.id, dueAt: entry.dueAt, lastNotifiedAt }];
+  });
+  return { ok: true, enabled: config.enabled, allowed, recurring: true, deliveries };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {

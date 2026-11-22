@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Smart Notebook — напоминания",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Напоминает о повторении заметок при закрытой вкладке Smart Notebook.",
   "minimum_chrome_version": "120",
   "permissions": ["alarms", "notifications", "storage"],

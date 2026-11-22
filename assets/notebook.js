@@ -1134,7 +1134,9 @@
     els.btnToggleBackground.disabled = transient.checkingBackground;
     els.btnToggleBackground.textContent = extension.enabled ? 'Отключить фоновые' : 'Включить фоновые';
     els.btnTestBackground.hidden = !extension.enabled || !extension.allowed;
-    els.extensionStatus.textContent = extension.enabled && extension.allowed ? 'Включено. Оставьте Chrome или Edge запущенным.' :
+    els.extensionStatus.textContent = extension.available && !extension.recurring ?
+      'Обновите расширение до версии 1.1.0 или новее, чтобы получать повторные напоминания.' :
+      extension.enabled && extension.allowed ? 'Включено. Оставьте Chrome или Edge запущенным.' :
       extension.enabled ? 'Уведомления расширения заблокированы. Проверьте настройки браузера и системы.' :
       extension.available ? 'Расширение подключено. Включите доставку в этом браузере.' :
       transient.checkingBackground ? 'Проверяем подключение расширения…' :
@@ -1171,13 +1173,13 @@
   }
 
   function reminderEntries() {
-    return state.notes.filter(note => note.repeat.enabled && !note.repeat.completed && note.repeat.nextReviewAt)
+    const entries = state.notes.filter(note => note.repeat.enabled && !note.repeat.completed && note.repeat.nextReviewAt)
       .map(note => ({
         id: note.id,
         title: note.title,
-        dueAt: note.repeat.nextReviewAt,
-        delivered: reminders.siteWasDelivered(note.id, note.repeat.nextReviewAt)
+        dueAt: note.repeat.nextReviewAt
       }));
+    return reminders.withDelivery(entries);
   }
 
   function checkDue() {
@@ -1195,7 +1197,10 @@
     renderStats();
     renderNotesList();
     if (getSelectedNote()) renderRepeatSection(getSelectedNote());
-    if (!transient.checkingBackground) void reminders.deliverDue(reminderEntries, openReminder);
+    if (!transient.checkingBackground) {
+      void reminders.syncBackground(reminderEntries);
+      void reminders.deliverDue(reminderEntries, openReminder);
+    }
   }
 
   function openReminder(id) {

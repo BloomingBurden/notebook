@@ -10,8 +10,8 @@
   <script defer src="./assets/vendor/markdown-it.min.js"></script>
   <script defer src="./assets/vendor/highlight.min.js"></script>
   <script defer src="./assets/editor.js"></script>
-  <script defer src="./assets/reminders.js"></script>
-  <script defer src="./assets/notebook.js"></script>
+  <script defer src="./assets/reminders.js?v=2"></script>
+  <script defer src="./assets/notebook.js?v=2"></script>
 </head>
 <body data-theme="light">
   <header class="app-header">
@@ -187,6 +187,7 @@
       <h2>Уведомления о повторении</h2>
       <form method="dialog"><button class="icon-button" aria-label="Закрыть">×</button></form>
     </div>
+    <p class="help-text">Пока этап просрочен, напоминание приходит раз в 30 минут. После отметки о выполнении начинает действовать срок следующего этапа.</p>
     <div class="notification-option">
       <h3>С открытой вкладкой</h3>
       <p id="siteNotificationStatus"></p>
@@ -201,7 +202,7 @@
       <div class="option-actions">
         <button id="btnToggleBackground" class="btn-primary small" type="button" hidden>Включить фоновые</button>
         <button id="btnTestBackground" class="btn-secondary small" type="button" hidden>Проверить</button>
-        <a href="https://github.com/BloomingBurden/notebook#уведомления-с-закрытой-вкладкой" target="_blank" rel="noopener noreferrer">Как установить расширение</a>
+        <a href="https://github.com/BloomingBurden/notebook#уведомления-с-закрытой-вкладкой" target="_blank" rel="noopener noreferrer">Установка и обновление расширения</a>
       </div>
     </div>
   </dialog>

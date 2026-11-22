@@ -2,7 +2,9 @@
   'use strict';
 
   const APP_URL = new URL('./notebook_app_rich_improved.html', location.href);
-  const STORAGE_KEY = 'smart-notebook-delivered-reviews-v1';
+  const STORAGE_KEY = 'smart-notebook-delivered-reviews-v2';
+  const LEGACY_KEY = 'smart-notebook-delivered-reviews-v1';
+  const REMINDER_INTERVAL = 30 * 60_000;
   const BRIDGE = 'smart-notebook-reminders';
   let registration;
   let extensionEnabled = false;
@@ -44,12 +46,16 @@
     });
   }
 
-  function updateExtensionStatus(response) {
+  async function updateExtensionStatus(response) {
     const previouslyEnabled = extensionEnabled;
     extensionEnabled = Boolean(response?.enabled);
     extensionDelivers = Boolean(extensionEnabled && response?.allowed);
     if (!extensionEnabled || !previouslyEnabled) lastSync = null;
-    return { available: Boolean(response?.ok), enabled: extensionEnabled, allowed: response?.allowed };
+    if (response?.deliveries?.length) await withDeliveryLock(() => markDelivered(response.deliveries));
+    return {
+      available: Boolean(response?.ok), enabled: extensionEnabled, allowed: response?.allowed,
+      recurring: response?.recurring === true
+    };
   }
 
   function enqueueBackground(task) {
@@ -64,7 +70,7 @@
   function setBackground(enabled, getEntries) {
     return enqueueBackground(async () => {
       const entries = enabled ? getEntries() : [];
-      const result = updateExtensionStatus(await sendToExtension('set-enabled', { enabled, entries }));
+      const result = await updateExtensionStatus(await sendToExtension('set-enabled', { enabled, entries }));
       if (result.enabled) lastSync = JSON.stringify(entries);
       return result;
     });
@@ -76,7 +82,9 @@
       const entries = getEntries();
       const json = JSON.stringify(entries);
       if (json === lastSync) return;
-      const result = updateExtensionStatus(await sendToExtension('sync', { entries }));
+      const response = await sendToExtension('sync', { entries });
+      if (!response?.ok) return;
+      const result = await updateExtensionStatus(response);
       if (result.enabled) lastSync = json;
     });
   }
@@ -85,7 +93,12 @@
     const url = new URL(APP_URL);
     if (noteId) url.searchParams.set('note', noteId);
     else if (noteId === '') url.searchParams.set('review', 'due');
-    const options = { body, tag: noteId === undefined ? 'review-test' : noteId ? 'review-' + noteId : 'review-due', data: { url: url.href } };
+    const options = {
+      body,
+      tag: noteId === undefined ? 'review-test' : noteId ? 'review-' + noteId : 'review-due',
+      renotify: true,
+      data: { url: url.href }
+    };
     const worker = await registration;
     if (worker) {
       await worker.showNotification(title, { ...options, icon: new URL('./extension/icon.png', APP_URL).href });
@@ -101,44 +114,64 @@
     }
   }
 
-  function deliveredReviews() {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+  function loadDeliveries(key) {
+    try { return JSON.parse(localStorage.getItem(key)) || {}; }
     catch { return {}; }
   }
 
+  function withDelivery(entries) {
+    const recorded = loadDeliveries(STORAGE_KEY);
+    const legacy = loadDeliveries(LEGACY_KEY);
+    return entries.map(entry => {
+      const delivery = recorded[entry.id];
+      const lastNotifiedAt = delivery?.dueAt === entry.dueAt && Number.isSafeInteger(delivery.lastNotifiedAt) ? delivery.lastNotifiedAt :
+        legacy[entry.id] === entry.dueAt ? entry.dueAt : null;
+      return { ...entry, lastNotifiedAt, delivered: lastNotifiedAt !== null };
+    });
+  }
+
+  function withDeliveryLock(task) {
+    if (navigator.locks && location.origin !== 'null') return navigator.locks.request(STORAGE_KEY, task);
+    return task();
+  }
+
   function markDelivered(entries) {
-    const now = Date.now();
-    const recorded = Object.fromEntries(Object.entries(deliveredReviews()).filter(([, dueAt]) => now - dueAt < 90 * 86400_000));
-    for (const { id, dueAt } of entries) {
-      Object.defineProperty(recorded, id, { value: dueAt, enumerable: true, configurable: true });
+    const oldest = Date.now() - 90 * 86400_000;
+    const recorded = new Map(Object.entries(loadDeliveries(STORAGE_KEY)).filter(([, entry]) => entry?.lastNotifiedAt >= oldest));
+    let changed = false;
+    for (const { id, dueAt, lastNotifiedAt } of entries) {
+      if ((recorded.get(id)?.lastNotifiedAt ?? 0) >= lastNotifiedAt) continue;
+      recorded.set(id, { dueAt, lastNotifiedAt });
+      changed = true;
     }
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(recorded)); }
+    if (!changed) return;
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(recorded))); }
     catch (error) { console.warn('Delivery state could not be saved', error); }
   }
 
   async function deliverDue(getEntries, onOpen) {
     if (extensionDelivers || window.Notification?.permission !== 'granted') return;
-    const notify = async () => {
-      const recorded = deliveredReviews();
-      const entries = getEntries().filter(entry => entry.dueAt <= Date.now() && recorded[entry.id] !== entry.dueAt);
+    await withDeliveryLock(async () => {
+      if (extensionDelivers) return;
+      const now = Date.now();
+      const entries = getEntries().filter(({ dueAt, lastNotifiedAt }) =>
+        dueAt <= now && (lastNotifiedAt === null || now - lastNotifiedAt >= REMINDER_INTERVAL));
       if (!entries.length) return;
       const single = entries.length === 1;
       const body = single ? entries[0].title : 'Заметок к повторению: ' + entries.length;
       try {
         await showSystemNotification('Пора повторить', body, single ? entries[0].id : '', onOpen);
-        markDelivered(entries);
+        const lastNotifiedAt = Date.now();
+        markDelivered(entries.map(entry => ({ ...entry, lastNotifiedAt })));
       } catch (error) {
         console.warn('Reminder could not be displayed', error);
       }
-    };
-    if (navigator.locks && location.origin !== 'null') await navigator.locks.request(STORAGE_KEY, notify);
-    else await notify();
+    });
   }
 
   window.notebookReminders = {
-    start, getBackgroundStatus, setBackground, syncBackground, deliverDue,
+    start, getBackgroundStatus, setBackground, syncBackground, deliverDue, withDelivery,
     testBackground: () => sendToExtension('test'),
-    testSite: () => showSystemNotification('Проверка уведомлений', 'Smart Notebook сможет напомнить о повторении.'),
-    siteWasDelivered: (id, dueAt) => deliveredReviews()[id] === dueAt
+    testSite: () => showSystemNotification('Проверка уведомлений', 'Smart Notebook сможет напомнить о повторении.')
   };
 })();
