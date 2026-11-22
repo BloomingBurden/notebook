@@ -4,12 +4,15 @@
   const editor = window.notebookEditor;
   const reminders = window.notebookReminders;
   const STORAGE_KEY = 'smart-notebook-single-file-v1';
+  const DATA_VERSION = 3;
+  const DAY = 24 * 60 * 60_000;
   const REVIEW_PLAN = [
-    { label: 'Сразу после изучения', delayMs: 0 },
-    { label: 'Через 25 минут', delayMs: 25 * 60 * 1000 },
-    { label: 'Через 1 день', delayMs: 24 * 60 * 60 * 1000 },
-    { label: 'Через 17 дней', delayMs: 17 * 24 * 60 * 60 * 1000 },
-    { label: 'Через 75 дней', delayMs: 75 * 24 * 60 * 60 * 1000 }
+    { label: 'Через 25 минут', delayMs: 25 * 60_000 },
+    { label: 'Через 1 день', delayMs: DAY },
+    { label: 'Через неделю', delayMs: 7 * DAY },
+    { label: 'Через 2 недели', delayMs: 14 * DAY },
+    { label: 'Через месяц', delayMs: 30 * DAY },
+    { label: 'Через 75 дней', delayMs: 75 * DAY }
   ];
 
   const els = {
@@ -78,6 +81,7 @@
 
   const modes = [...document.querySelectorAll('[data-editor-mode]')];
   let lastPersistedState = null;
+  let migratedReviewPlan = false;
   let state = loadState();
   let transient = {
     search: '',
@@ -100,7 +104,7 @@
     applyTheme(state.ui.theme);
     bindEvents();
     ensureSelectionIntegrity();
-    if (lastPersistedState === null) persistState(false, { render: false });
+    if (lastPersistedState === null || migratedReviewPlan) persistState(false, { render: false });
     reminders.start(openReminder);
     const query = new URLSearchParams(location.search);
     if (query.has('note')) openReminder(query.get('note'));
@@ -114,7 +118,7 @@
     const rootId = uid();
     const welcomeNoteId = uid();
     return {
-      version: 2,
+      version: DATA_VERSION,
       folders: [{
         id: rootId,
         parentId: null,
@@ -175,7 +179,9 @@
       lastPersistedState = raw;
       if (!raw) return createDefaultState();
       const parsed = JSON.parse(raw);
-      return sanitizeState(parsed);
+      const normalized = sanitizeState(parsed);
+      migratedReviewPlan = parsed && (Number(parsed.version) || 1) < DATA_VERSION;
+      return normalized;
     } catch (error) {
       console.error(error);
       showToast('Не удалось прочитать данные из LocalStorage. Создано новое хранилище.', 'warning');
@@ -186,6 +192,7 @@
   function sanitizeState(input) {
     const fallback = createDefaultState();
     if (!input || typeof input !== 'object') return fallback;
+    const version = Number(input.version) || 1;
 
     const folders = Array.isArray(input.folders) ? input.folders : fallback.folders;
     const notes = Array.isArray(input.notes) ? input.notes : fallback.notes;
@@ -232,11 +239,11 @@
         history: sanitizeHistory(note.history),
         createdAt: validTimestamp(note.createdAt) || Date.now(),
         updatedAt: validTimestamp(note.updatedAt) || Date.now(),
-        repeat: sanitizeRepeat(note.repeat)
+        repeat: sanitizeRepeat(note.repeat, version < DATA_VERSION)
       }));
 
     return {
-      version: Number(input.version) || 1,
+      version: Math.max(version, DATA_VERSION),
       folders: safeFolders,
       notes: safeNotes,
       ui: {
@@ -269,10 +276,9 @@
       .slice(0, 20);
   }
 
-  function sanitizeRepeat(repeat) {
-    const base = defaultRepeat();
-    if (!repeat || typeof repeat !== 'object') return base;
-    return {
+  function sanitizeRepeat(repeat, legacyPlan) {
+    if (!repeat || typeof repeat !== 'object') return defaultRepeat();
+    const normalized = {
       enabled: Boolean(repeat.enabled),
       stageIndex: Number.isInteger(repeat.stageIndex) ? repeat.stageIndex : -1,
       nextReviewAt: validTimestamp(repeat.nextReviewAt),
@@ -280,6 +286,27 @@
       completed: Boolean(repeat.completed),
       lastNotificationAt: validTimestamp(repeat.lastNotificationAt)
     };
+    if (legacyPlan && normalized.enabled) migrateReviewPlan(normalized);
+    return normalized;
+  }
+
+  function migrateReviewPlan(repeat) {
+    if (repeat.completed) {
+      repeat.stageIndex = REVIEW_PLAN.length - 1;
+      repeat.nextReviewAt = null;
+      return;
+    }
+    if (repeat.stageIndex < 0 || !repeat.nextReviewAt) return;
+
+    const oldStage = repeat.stageIndex;
+    repeat.stageIndex = [0, 0, 1, 2, 4][oldStage] ?? -1;
+    // The 25-minute and one-day stages keep their original deadlines.
+    if (oldStage === 1 || oldStage === 2 || repeat.stageIndex < 0) return;
+    const previousGap = oldStage === 3 ? 17 * DAY : oldStage === 4 ? 75 * DAY : 0;
+    const anchor = oldStage === 0 ? repeat.nextReviewAt : repeat.lastReviewedAt ?? repeat.nextReviewAt - previousGap;
+    repeat.nextReviewAt = validTimestamp(anchor + REVIEW_PLAN[repeat.stageIndex].delayMs) ?? repeat.nextReviewAt;
+    if (oldStage === 0) repeat.lastReviewedAt = null;
+    repeat.lastNotificationAt = null;
   }
 
   function validTimestamp(value) {
@@ -818,7 +845,7 @@
     els.nextReviewText.textContent = !repeat.enabled ? 'Отключено' : repeat.completed ? 'Все этапы выполнены' :
       active ? 'Этап ' + (repeat.stageIndex + 1) + ' из ' + REVIEW_PLAN.length + ' · ' +
         formatDateTime(repeat.nextReviewAt) + ' (' + formatRelative(repeat.nextReviewAt) + ')' :
-        'Сразу, через 25 минут, затем через 1, 17 и 75 дней.';
+        'Первое повторение через 25 минут после запуска.';
     els.repeatTimeline.replaceChildren(...REVIEW_PLAN.map((step, index) => {
       const pill = document.createElement('span');
       const done = repeat.completed || repeat.stageIndex > index;
@@ -1011,14 +1038,15 @@
     const note = getSelectedNote();
     if (!note) return showToast('Сначала выберите заметку.', 'warning');
     if (!note.repeat.enabled) return showToast('Сначала включите повторение.', 'warning');
+    const now = Date.now();
     note.repeat.stageIndex = 0;
     note.repeat.completed = false;
-    note.repeat.nextReviewAt = Date.now();
+    note.repeat.nextReviewAt = now + REVIEW_PLAN[0].delayMs;
     note.repeat.lastReviewedAt = null;
     note.repeat.lastNotificationAt = null;
-    note.updatedAt = Date.now();
+    note.updatedAt = now;
     persistState(true);
-    checkDue();
+    showToast('Цикл начат. Первое повторение через 25 минут.', 'success');
   }
 
   function onCompleteReview() {
