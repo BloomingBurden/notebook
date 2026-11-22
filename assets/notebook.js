@@ -4,10 +4,12 @@
   const editor = window.notebookEditor;
   const reminders = window.notebookReminders;
   const STORAGE_KEY = 'smart-notebook-single-file-v1';
-  const DATA_VERSION = 3;
-  const DAY = 24 * 60 * 60_000;
+  const DATA_VERSION = 4;
+  const HOUR = 60 * 60_000;
+  const DAY = 24 * HOUR;
   const REVIEW_PLAN = [
     { label: 'Через 25 минут', delayMs: 25 * 60_000 },
+    { label: 'Через час', delayMs: HOUR },
     { label: 'Через 1 день', delayMs: DAY },
     { label: 'Через неделю', delayMs: 7 * DAY },
     { label: 'Через 2 недели', delayMs: 14 * DAY },
@@ -239,7 +241,7 @@
         history: sanitizeHistory(note.history),
         createdAt: validTimestamp(note.createdAt) || Date.now(),
         updatedAt: validTimestamp(note.updatedAt) || Date.now(),
-        repeat: sanitizeRepeat(note.repeat, version < DATA_VERSION)
+        repeat: sanitizeRepeat(note.repeat, version)
       }));
 
     return {
@@ -276,7 +278,7 @@
       .slice(0, 20);
   }
 
-  function sanitizeRepeat(repeat, legacyPlan) {
+  function sanitizeRepeat(repeat, version) {
     if (!repeat || typeof repeat !== 'object') return defaultRepeat();
     const normalized = {
       enabled: Boolean(repeat.enabled),
@@ -286,11 +288,11 @@
       completed: Boolean(repeat.completed),
       lastNotificationAt: validTimestamp(repeat.lastNotificationAt)
     };
-    if (legacyPlan && normalized.enabled) migrateReviewPlan(normalized);
+    if (version < DATA_VERSION && normalized.enabled) migrateReviewPlan(normalized, version);
     return normalized;
   }
 
-  function migrateReviewPlan(repeat) {
+  function migrateReviewPlan(repeat, version) {
     if (repeat.completed) {
       repeat.stageIndex = REVIEW_PLAN.length - 1;
       repeat.nextReviewAt = null;
@@ -299,13 +301,21 @@
     if (repeat.stageIndex < 0 || !repeat.nextReviewAt) return;
 
     const oldStage = repeat.stageIndex;
-    repeat.stageIndex = [0, 0, 1, 2, 4][oldStage] ?? -1;
-    // The 25-minute and one-day stages keep their original deadlines.
-    if (oldStage === 1 || oldStage === 2 || repeat.stageIndex < 0) return;
-    const previousGap = oldStage === 3 ? 17 * DAY : oldStage === 4 ? 75 * DAY : 0;
-    const anchor = oldStage === 0 ? repeat.nextReviewAt : repeat.lastReviewedAt ?? repeat.nextReviewAt - previousGap;
-    repeat.nextReviewAt = validTimestamp(anchor + REVIEW_PLAN[repeat.stageIndex].delayMs) ?? repeat.nextReviewAt;
-    if (oldStage === 0) repeat.lastReviewedAt = null;
+    let previousDelay;
+    if (version < 3) {
+      // The five-step plan used immediate, 25-minute, day, 17-day and 75-day stages.
+      repeat.stageIndex = [0, 0, 1, 3, 5][oldStage] ?? -1;
+      previousDelay = [0, null, DAY, 17 * DAY, 75 * DAY][oldStage];
+      if (oldStage === 0) repeat.lastReviewedAt = null;
+    } else {
+      if (oldStage > 1) repeat.stageIndex += 1;
+      previousDelay = oldStage === 1 ? DAY : null;
+    }
+
+    if (previousDelay == null) return;
+    const anchor = repeat.lastReviewedAt ?? repeat.nextReviewAt - previousDelay;
+    const newDelay = REVIEW_PLAN[repeat.stageIndex].delayMs;
+    repeat.nextReviewAt = validTimestamp(anchor + newDelay) ?? repeat.nextReviewAt;
     repeat.lastNotificationAt = null;
   }
 
