@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8f5">
+  <title>Smart Notebook — заметки и повторение</title>
+  <link rel="icon" href="./extension/icon.png">
+  <link rel="stylesheet" href="./assets/notebook.css">
+  <script defer src="./assets/vendor/markdown-it.min.js"></script>
+  <script defer src="./assets/vendor/highlight.min.js"></script>
+  <script defer src="./assets/editor.js"></script>
+  <script defer src="./assets/reminders.js"></script>
+  <script defer src="./assets/notebook.js"></script>
+</head>
+<body data-theme="light">
+  <header class="app-header">
+    <div class="brand">
+      <img src="./extension/icon.png" alt="" width="36" height="36">
+      <span>Smart Notebook</span>
+    </div>
+    <div class="search-wrap">
+      <span class="search-icon" aria-hidden="true"></span>
+      <input id="globalSearch" type="search" aria-label="Поиск по заметкам" placeholder="Поиск по заметкам…" autocomplete="off">
+      <button id="btnClearSearch" type="button" class="icon-button hidden" aria-label="Сбросить поиск">×</button>
+    </div>
+    <div class="header-actions">
+      <span id="saveStatus" class="save-status" role="status">Локальное хранилище</span>
+      <button id="btnNotifications" class="btn-secondary notification-button" type="button"><span class="bell-icon" aria-hidden="true"></span><span>Уведомления</span></button>
+      <details id="settingsMenu" class="menu">
+        <summary class="btn-secondary icon-button" aria-label="Настройки" title="Настройки">⚙</summary>
+        <div class="menu-popover">
+          <button id="btnTheme" type="button">Тёмная тема</button>
+          <button id="btnExport" type="button">Экспорт JSON</button>
+          <button id="btnImport" type="button">Импорт JSON</button>
+        </div>
+      </details>
+      <input id="importFile" hidden type="file" accept="application/json,.json">
+    </div>
+  </header>
+  <div class="workspace">
+    <aside class="sidebar" aria-label="Навигация блокнота">
+      <button id="btnAddNote" class="btn-primary new-note" type="button"><span aria-hidden="true">＋</span> Новая заметка</button>
+      <nav class="quick-nav" aria-label="Разделы">
+        <button id="btnShowAllNotes" type="button"><span class="nav-symbol" aria-hidden="true">▤</span> Все заметки <span id="statNotes" class="count"></span></button>
+        <button id="btnOpenDueOnly" type="button"><span class="nav-symbol" aria-hidden="true">◷</span> К повторению <span id="statDue" class="count"></span></button>
+      </nav>
+      <section class="folder-section" aria-labelledby="foldersTitle">
+        <div class="side-heading">
+          <h2 id="foldersTitle">Папки</h2>
+          <button id="btnAddFolder" class="icon-button" type="button" title="Добавить подпапку" aria-label="Добавить подпапку">＋</button>
+        </div>
+        <div id="folderTree" class="tree"></div>
+        <div class="folder-tools">
+          <button id="btnRenameFolder" type="button">Переименовать</button>
+          <button id="btnDeleteFolder" type="button">Удалить</button>
+        </div>
+      </section>
+    </aside>
+    <section class="notes-panel" aria-labelledby="notesPanelTitle">
+      <div class="notes-heading">
+        <h2 id="notesPanelTitle">Все заметки</h2>
+        <p id="notesPanelSubtitle"></p>
+      </div>
+      <div id="notesList" class="notes-list"></div>
+    </section>
+    <main class="main-panel">
+      <div id="editorEmpty" class="editor-empty">
+        <div class="empty-symbol" aria-hidden="true">▤</div>
+        <h1>Выберите заметку</h1>
+        <p>Откройте запись из списка или создайте новую.</p>
+      </div>
+      <article id="editorWrap" class="editor hidden" aria-label="Выбранная заметка">
+        <div class="document">
+          <div class="document-bar">
+            <div id="breadcrumbs" class="breadcrumbs" aria-label="Папка заметки"></div>
+            <div class="document-actions">
+              <button id="btnTogglePin" class="btn-secondary small" type="button">Закрепить</button>
+              <details id="noteMenu" class="menu">
+                <summary class="btn-secondary icon-button" aria-label="Действия с заметкой" title="Действия с заметкой">···</summary>
+                <div class="menu-popover">
+                  <button id="btnHistory" type="button">История версий</button>
+                  <button id="btnDuplicateNote" type="button">Дублировать</button>
+                  <button id="btnDeleteNote" class="danger-text" type="button">Удалить заметку</button>
+                </div>
+              </details>
+            </div>
+          </div>
+          <input id="noteTitle" class="document-title" type="text" aria-label="Название заметки" autocomplete="off" placeholder="Без названия">
+          <details class="note-properties">
+            <summary>Свойства заметки</summary>
+            <div class="properties-grid">
+              <label>Теги <input id="noteTags" type="text" autocomplete="off" placeholder="Через запятую"></label>
+              <label>Папка <select id="noteFolderMove"></select></label>
+            </div>
+          </details>
+          <div id="editorRepeatBanner" class="due-banner hidden">
+            <strong>Пора повторить</strong>
+            <span id="editorRepeatBannerText"></span>
+            <button id="btnReviewNow" class="btn-warning small" type="button">Отметить выполненным</button>
+          </div>
+          <section class="editor-card" aria-label="Редактор заметки">
+            <div class="editor-top">
+              <div class="editor-tabs" role="group" aria-label="Режим редактора">
+                <button type="button" data-editor-mode="write" aria-pressed="false">Текст</button>
+                <button type="button" data-editor-mode="split" aria-pressed="false">Рядом</button>
+                <button type="button" data-editor-mode="read" aria-pressed="true">Чтение</button>
+              </div>
+              <button id="btnSaveNow" class="text-button small hidden" type="button">Сохранить</button>
+            </div>
+            <div id="formatToolbar" class="format-toolbar hidden" role="group" aria-label="Форматирование Markdown">
+              <button type="button" data-format="heading" title="Заголовок" aria-label="Заголовок">H₂</button>
+              <button type="button" data-format="bold" title="Жирный (Ctrl/Cmd+B)" aria-label="Жирный"><strong>B</strong></button>
+              <button type="button" data-format="italic" title="Курсив (Ctrl/Cmd+I)" aria-label="Курсив"><em>I</em></button>
+              <button type="button" data-format="strike" title="Зачёркнутый" aria-label="Зачёркнутый"><s>S</s></button>
+              <span class="toolbar-divider" aria-hidden="true"></span>
+              <button type="button" data-format="ul" title="Маркированный список" aria-label="Маркированный список">≡</button>
+              <button type="button" data-format="ol" title="Нумерованный список" aria-label="Нумерованный список">1.</button>
+              <button type="button" data-format="task" title="Задачи" aria-label="Задачи">☑</button>
+              <button type="button" data-format="quote" title="Цитата" aria-label="Цитата">❞</button>
+              <button type="button" data-format="link" title="Ссылка" aria-label="Ссылка">↗</button>
+              <button type="button" data-format="table" title="Таблица" aria-label="Таблица">▦</button>
+              <span class="toolbar-divider" aria-hidden="true"></span>
+              <button type="button" data-format="inline" title="Код в строке" aria-label="Код в строке">&lt;/&gt;</button>
+              <div class="code-controls">
+                <select id="codeLanguage" aria-label="Язык блока кода">
+                  <option value="">Без языка</option>
+                  <option value="javascript" selected>JavaScript</option>
+                  <option value="typescript">TypeScript</option>
+                  <option value="python">Python</option>
+                  <option value="html">HTML</option>
+                  <option value="css">CSS</option>
+                  <option value="json">JSON</option>
+                  <option value="sql">SQL</option>
+                  <option value="bash">Bash</option>
+                  <option value="powershell">PowerShell</option>
+                  <option value="java">Java</option>
+                  <option value="csharp">C#</option>
+                  <option value="cpp">C++</option>
+                  <option value="go">Go</option>
+                  <option value="rust">Rust</option>
+                  <option value="yaml">YAML</option>
+                  <option value="markdown">Markdown</option>
+                </select>
+                <button type="button" data-format="code">Блок кода</button>
+              </div>
+            </div>
+            <div id="editorPanes" class="editor-panes">
+              <div id="editorInputWrap" class="editor-input hidden">
+                <div class="pane-label">Markdown</div>
+                <textarea id="noteContent" aria-label="Текст заметки в Markdown" placeholder="Запишите мысли или вставьте фрагмент кода…" spellcheck="false"></textarea>
+              </div>
+              <div id="editorReadingWrap" class="editor-reading">
+                <div class="pane-label">Предпросмотр</div>
+                <div id="notePreview" class="editor-preview"></div>
+              </div>
+            </div>
+            <footer class="editor-footer">
+              <span id="editorMeta"></span>
+              <span id="editorShortcuts" class="hidden">Tab — отступ в блоке кода · Esc — выход из поля</span>
+            </footer>
+          </section>
+          <section id="repeatCard" class="repeat-card" aria-labelledby="repeatTitle">
+            <div class="repeat-heading">
+              <span class="review-icon" aria-hidden="true">◷</span>
+              <div><h2 id="repeatTitle">Повторение</h2><p id="nextReviewText">Отключено</p></div>
+              <label class="switch"><input id="repeatEnabled" type="checkbox" aria-label="Включить повторение"><span aria-hidden="true"></span></label>
+            </div>
+            <div id="repeatDetails" class="repeat-details hidden">
+              <div id="repeatTimeline" class="repeat-timeline"></div>
+              <div class="repeat-actions">
+                <button id="btnStartReview" class="btn-primary small" type="button">Начать цикл</button>
+                <button id="btnCompleteReview" class="btn-primary small" type="button">Отметить выполненным</button>
+                <button id="btnResetReview" class="btn-secondary small" type="button">Сбросить цикл</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </article>
+    </main>
+  </div>
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+  <div id="modalRoot" class="hidden"></div>
+
+  <dialog id="notificationsDialog" class="notification-dialog">
+    <div class="dialog-heading">
+      <h2>Уведомления о повторении</h2>
+      <form method="dialog"><button class="icon-button" aria-label="Закрыть">×</button></form>
+    </div>
+    <div class="notification-option">
+      <h3>С открытой вкладкой</h3>
+      <p id="siteNotificationStatus"></p>
+      <div class="option-actions">
+        <button id="btnAllowSite" class="btn-primary small" type="button">Разрешить на сайте</button>
+        <button id="btnTestSite" class="btn-secondary small" type="button">Проверить</button>
+      </div>
+    </div>
+    <div class="notification-option">
+      <h3>Даже с закрытой вкладкой</h3>
+      <p id="extensionStatus" aria-live="polite"></p>
+      <div class="option-actions">
+        <button id="btnToggleBackground" class="btn-primary small" type="button" hidden>Включить фоновые</button>
+        <button id="btnTestBackground" class="btn-secondary small" type="button" hidden>Проверить</button>
+        <a href="https://github.com/BloomingBurden/notebook#уведомления-с-закрытой-вкладкой" target="_blank" rel="noopener noreferrer">Как установить расширение</a>
+      </div>
+    </div>
+  </dialog>
+</body>
+</html>
