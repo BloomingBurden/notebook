@@ -9,9 +9,11 @@
   <link rel="stylesheet" href="./assets/notebook.css">
   <script defer src="./assets/vendor/markdown-it.min.js"></script>
   <script defer src="./assets/vendor/highlight.min.js"></script>
-  <script defer src="./assets/editor.js"></script>
+  <script defer src="./assets/vendor/turndown.js"></script>
+  <script defer src="./assets/clipboard.js"></script>
+  <script defer src="./assets/editor.js?v=2"></script>
   <script defer src="./assets/reminders.js?v=2"></script>
-  <script defer src="./assets/notebook.js?v=4"></script>
+  <script defer src="./assets/notebook.js?v=5"></script>
 </head>
 <body data-theme="light">
   <header class="app-header">
@@ -148,7 +150,7 @@
             <div id="editorPanes" class="editor-panes">
               <div id="editorInputWrap" class="editor-input hidden">
                 <div class="pane-label">Markdown</div>
-                <textarea id="noteContent" aria-label="Текст заметки в Markdown" placeholder="Запишите мысли или вставьте фрагмент кода…" spellcheck="false"></textarea>
+                <textarea id="noteContent" aria-label="Текст заметки в Markdown" placeholder="Напишите текст или вставьте ответ из чата…" spellcheck="false"></textarea>
               </div>
               <div id="editorReadingWrap" class="editor-reading">
                 <div class="pane-label">Предпросмотр</div>

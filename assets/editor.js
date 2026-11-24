@@ -10,6 +10,9 @@
   };
   const indent = '    ';
   const openingFence = /^ {0,3}(\x60{3,}|~{3,})(.*)$/;
+  const formattedBlocks = new Set(['heading_open', 'bullet_list_open', 'ordered_list_open', 'blockquote_open',
+    'fence', 'code_block', 'table_open', 'hr']);
+  const formattedInline = new Set(['strong_open', 'em_open', 's_open', 'code_inline', 'link_open', 'image']);
 
   function closesFence(line, fence) {
     const match = openingFence.exec(line);
@@ -122,6 +125,65 @@
     return next < 0 ? value.length : next;
   }
 
+  function clipboardLayout(text) {
+    const tokens = markdown.parse(normalizeLegacyBullets(text), {});
+    const block = tokens.some(token => formattedBlocks.has(token.type));
+    const inline = tokens.some(token => token.children?.some(child =>
+      formattedInline.has(child.type) && child.markup !== 'linkify'));
+    return { formatted: block || inline, block: block || /\n\s*\n/.test(text) };
+  }
+
+  function clipboardMarkdown(clipboard) {
+    const explicit = clipboard.getData('text/markdown') || clipboard.getData('text/x-markdown');
+    if (explicit.trim()) return { text: explicit, block: clipboardLayout(explicit).block };
+
+    const plain = clipboard.getData('text/plain');
+    const html = clipboard.getData('text/html');
+    let htmlFallback = null;
+    if (html && window.notebookClipboard) {
+      try {
+        const text = window.notebookClipboard.fromHtml(html);
+        const layout = clipboardLayout(text);
+        if (layout.formatted) return { text, block: layout.block };
+        if (text && (layout.block || !plain)) htmlFallback = { text, block: layout.block };
+      } catch (error) {
+        console.warn('Formatted clipboard content could not be converted', error);
+      }
+    }
+
+    const layout = clipboardLayout(plain);
+    return layout.formatted ? { text: plain, block: layout.block } : htmlFallback;
+  }
+
+  function pastesIntoCode(value, offset) {
+    if (!value) return false;
+    const line = value.slice(0, offset).split('\n').length - 1;
+    return markdown.parse(normalizeLegacyBullets(value), {}).some(token => {
+      if (token.type === 'fence') return line > token.map[0] && line < token.map[1];
+      if (token.type === 'code_block') return line >= token.map[0] && line < token.map[1];
+      return false;
+    });
+  }
+
+  function paste(event, field) {
+    if (!event.clipboardData || !field || field.readOnly) return false;
+    const { value, selectionStart, selectionEnd } = field;
+    const fragment = clipboardMarkdown(event.clipboardData);
+    if (!fragment || pastesIntoCode(value, selectionStart)) return false;
+
+    let text = fragment.text.replace(/\r\n?/g, '\n');
+    if (fragment.block) {
+      const before = value.slice(0, selectionStart);
+      const after = value.slice(selectionEnd);
+      const gapBefore = !before || /\n[^\S\n]*\n[^\S\n]*$/.test(before) ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+      const gapAfter = !after || /^[^\S\n]*\n[^\S\n]*\n/.test(after) ? '' : after.startsWith('\n') ? '\n' : '\n\n';
+      text = gapBefore + text.replace(/^\n+|\n+$/g, '') + gapAfter;
+    }
+    event.preventDefault();
+    replaceSelection(field, selectionStart, selectionEnd, text);
+    return true;
+  }
+
   function wrapInline(field, delimiter, fallback, prefix = delimiter, suffix = delimiter) {
     const { value, selectionStart, selectionEnd } = field;
     const text = value.slice(selectionStart, selectionEnd) || fallback;
@@ -222,5 +284,5 @@
     }
   }
 
-  window.notebookEditor = { updatePreview, copyText, format, handleCodeKeys };
+  window.notebookEditor = { updatePreview, copyText, format, paste, handleCodeKeys };
 })();

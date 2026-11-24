@@ -340,6 +340,9 @@
     els.noteContent.addEventListener('keydown', event => editor.handleCodeKeys(event, els.noteContent, () => {
       modes.find(button => button.dataset.editorMode === transient.editorMode)?.focus();
     }));
+    els.noteContent.addEventListener('paste', event => {
+      if (editor.paste(event, els.noteContent) && transient.editorMode === 'write') setEditorMode('split');
+    });
     els.notePreview.addEventListener('click', async event => {
       const button = event.target.closest('[data-copy-code]');
       if (!button) return;
