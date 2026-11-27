@@ -149,13 +149,16 @@
     catch (error) { console.warn('Delivery state could not be saved', error); }
   }
 
+  function isReminderDue(dueAt, lastNotifiedAt, now) {
+    return dueAt <= now && (lastNotifiedAt === null || now - lastNotifiedAt >= REMINDER_INTERVAL);
+  }
+
   async function deliverDue(getEntries, onOpen) {
     if (extensionDelivers || window.Notification?.permission !== 'granted') return;
     await withDeliveryLock(async () => {
       if (extensionDelivers) return;
       const now = Date.now();
-      const entries = getEntries().filter(({ dueAt, lastNotifiedAt }) =>
-        dueAt <= now && (lastNotifiedAt === null || now - lastNotifiedAt >= REMINDER_INTERVAL));
+      const entries = getEntries().filter(({ dueAt, lastNotifiedAt }) => isReminderDue(dueAt, lastNotifiedAt, now));
       if (!entries.length) return;
       const single = entries.length === 1;
       const body = single ? entries[0].title : 'Заметок к повторению: ' + entries.length;
@@ -170,7 +173,7 @@
   }
 
   window.notebookReminders = {
-    start, getBackgroundStatus, setBackground, syncBackground, deliverDue, withDelivery,
+    start, getBackgroundStatus, setBackground, syncBackground, deliverDue, withDelivery, isReminderDue,
     testBackground: () => sendToExtension('test'),
     testSite: () => showSystemNotification('Проверка уведомлений', 'Smart Notebook сможет напомнить о повторении.')
   };

@@ -1223,18 +1223,34 @@
     return reminders.withDelivery(entries);
   }
 
-  function checkDue() {
-    const due = getDueNotes();
-    const current = new Map(due.map(note => [note.id, note.repeat.nextReviewAt]));
-    const added = due.filter(note => transient.dueToasts.get(note.id) !== note.repeat.nextReviewAt);
-    transient.dueToasts = current;
-    if (added.length) {
-      const note = added.length === 1 ? added[0] : null;
-      showToast(note ? 'Пора повторить «' + note.title + '».' : 'Заметок к повторению: ' + added.length, 'warning', {
-        actionText: 'Открыть',
-        onAction: () => openReminder(note?.id || '')
-      });
+  function showDueReminders(due) {
+    if (document.hidden) return;
+
+    const now = Date.now();
+    const current = new Map();
+    const ready = [];
+    for (const note of due) {
+      const dueAt = note.repeat.nextReviewAt;
+      const previous = transient.dueToasts.get(note.id);
+      let shownAt = previous?.dueAt === dueAt ? previous.shownAt : null;
+      if (reminders.isReminderDue(dueAt, shownAt, now)) {
+        ready.push(note);
+        shownAt = now;
+      }
+      current.set(note.id, { dueAt, shownAt });
     }
+    transient.dueToasts = current;
+    if (!ready.length) return;
+
+    const note = ready.length === 1 ? ready[0] : null;
+    showToast(note ? 'Пора повторить «' + note.title + '».' : 'Заметок к повторению: ' + ready.length, 'warning', {
+      actionText: 'Открыть',
+      onAction: () => openReminder(note?.id || '')
+    });
+  }
+
+  function checkDue() {
+    showDueReminders(getDueNotes());
     renderStats();
     renderNotesList();
     if (getSelectedNote()) renderRepeatSection(getSelectedNote());
